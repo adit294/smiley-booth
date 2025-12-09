@@ -1,0 +1,514 @@
+#!/usr/bin/env python3
+"""
+Smiley Booth - Smart Photobooth Application
+CS445 Final Project
+
+Authors: Shobhit Sinha, Jay Goenka, Adit Agarwal
+
+A real-time photobooth that automatically captures photos when the user
+is centered in the frame and smiling. Features multiple creative filters
+and artistic effects.
+"""
+
+import cv2
+import numpy as np
+import os
+import time
+from datetime import datetime
+from typing import Optional, Tuple
+
+from detection import FaceDetector, CaptureController, FaceData
+from filters import FilterManager, create_filter_preview_strip
+
+
+class SmileyBooth:
+    """
+    Main Smiley Booth Application
+    """
+    
+    def __init__(self, camera_id: int = 0, output_dir: str = "captured_photos"):
+        # Initialize camera
+        self.camera_id = camera_id
+        self.cap = None
+        
+        # Initialize modules
+        self.detector = FaceDetector()
+        self.capture_controller = CaptureController(
+            required_smile_frames=15,  # About 0.5 seconds of smiling
+            cooldown_frames=45  # 1.5 seconds between captures
+        )
+        self.filter_manager = FilterManager()
+        
+        # Output directory
+        self.output_dir = output_dir
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # UI state
+        self.show_preview_strip = True
+        self.show_help = False
+        self.manual_capture_mode = False
+        self.countdown_active = False
+        self.countdown_start = 0
+        self.countdown_duration = 3
+        
+        # Window settings
+        self.window_name = "Smiley Booth - Smart Photobooth"
+        
+        # Capture animation
+        self.flash_alpha = 0
+        self.last_capture_time = 0
+        self.captured_image = None
+        self.show_captured_preview = False
+        self.captured_preview_start = 0
+        
+    def init_camera(self) -> bool:
+        """Initialize the camera"""
+        self.cap = cv2.VideoCapture(self.camera_id)
+        
+        if not self.cap.isOpened():
+            print(f"Error: Could not open camera {self.camera_id}")
+            return False
+        
+        # Set camera resolution
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        self.cap.set(cv2.CAP_PROP_FPS, 30)
+        
+        # Get actual resolution
+        self.frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        
+        print(f"Camera initialized: {self.frame_width}x{self.frame_height}")
+        return True
+    
+    def save_photo(self, frame: np.ndarray, filtered: bool = True) -> str:
+        """Save captured photo to disk"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filter_name = self.filter_manager.get_current_filter_name() if filtered else "original"
+        filename = f"smiley_booth_{timestamp}_{filter_name}.jpg"
+        filepath = os.path.join(self.output_dir, filename)
+        
+        cv2.imwrite(filepath, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        print(f"Photo saved: {filepath}")
+        
+        return filepath
+    
+    def trigger_capture(self, frame: np.ndarray):
+        """Trigger photo capture with animation"""
+        # Apply current filter
+        filtered_frame = self.filter_manager.apply_current_filter(frame)
+        
+        # Save both original and filtered
+        self.save_photo(frame, filtered=False)
+        self.save_photo(filtered_frame, filtered=True)
+        
+        # Store for preview
+        self.captured_image = filtered_frame.copy()
+        self.show_captured_preview = True
+        self.captured_preview_start = time.time()
+        
+        # Trigger flash effect
+        self.flash_alpha = 1.0
+        self.last_capture_time = time.time()
+        
+        print("📸 Photo captured!")
+    
+    def draw_ui(self, frame: np.ndarray, face_data: Optional[FaceData]) -> np.ndarray:
+        """Draw the user interface overlay"""
+        ui_frame = frame.copy()
+        h, w = frame.shape[:2]
+        
+        # Draw detection overlay
+        ui_frame = self.detector.draw_detection_overlay(ui_frame, face_data)
+        
+        # Draw filter name
+        filter_name = self.filter_manager.get_current_filter_name().upper()
+        cv2.putText(ui_frame, f"Filter: {filter_name}",
+                   (w - 300, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+        
+        # Draw capture mode indicator
+        mode_text = "AUTO" if not self.manual_capture_mode else "MANUAL"
+        mode_color = (0, 255, 0) if not self.manual_capture_mode else (255, 165, 0)
+        cv2.putText(ui_frame, f"Mode: {mode_text}",
+                   (w - 300, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, mode_color, 2)
+        
+        # Draw countdown to capture (auto mode)
+        if not self.manual_capture_mode and face_data:
+            countdown = self.capture_controller.get_countdown()
+            if countdown > 0:
+                # Draw countdown circle
+                progress = 1 - (countdown / self.capture_controller.required_smile_frames)
+                end_angle = int(360 * progress)
+                
+                center = (w // 2, h - 80)
+                cv2.ellipse(ui_frame, center, (40, 40), -90, 0, end_angle, (0, 255, 0), 5)
+                cv2.putText(ui_frame, f"{countdown}", (center[0] - 10, center[1] + 10),
+                           cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
+        
+        # Draw manual countdown
+        if self.countdown_active:
+            elapsed = time.time() - self.countdown_start
+            remaining = self.countdown_duration - int(elapsed)
+            
+            if remaining > 0:
+                # Large countdown number
+                cv2.putText(ui_frame, str(remaining),
+                           (w // 2 - 50, h // 2 + 50),
+                           cv2.FONT_HERSHEY_SIMPLEX, 5, (0, 255, 255), 10)
+            else:
+                self.countdown_active = False
+                self.trigger_capture(frame)
+        
+        # Draw flash effect
+        if self.flash_alpha > 0:
+            flash_overlay = np.ones_like(ui_frame) * 255
+            ui_frame = cv2.addWeighted(ui_frame, 1 - self.flash_alpha,
+                                       flash_overlay, self.flash_alpha, 0)
+            self.flash_alpha = max(0, self.flash_alpha - 0.1)
+        
+        # Draw captured preview
+        if self.show_captured_preview and self.captured_image is not None:
+            preview_time = time.time() - self.captured_preview_start
+            if preview_time < 2.0:  # Show for 2 seconds
+                # Draw small preview in corner
+                preview_h = 150
+                preview_w = int(preview_h * w / h)
+                preview = cv2.resize(self.captured_image, (preview_w, preview_h))
+                
+                # Position in bottom right
+                x_offset = w - preview_w - 20
+                y_offset = h - preview_h - 20
+                
+                # Add border
+                cv2.rectangle(ui_frame, (x_offset - 5, y_offset - 5),
+                             (x_offset + preview_w + 5, y_offset + preview_h + 5),
+                             (0, 255, 0), 3)
+                
+                ui_frame[y_offset:y_offset + preview_h, x_offset:x_offset + preview_w] = preview
+                
+                cv2.putText(ui_frame, "SAVED!",
+                           (x_offset, y_offset - 10),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            else:
+                self.show_captured_preview = False
+        
+        # Draw help overlay
+        if self.show_help:
+            ui_frame = self.draw_help_overlay(ui_frame)
+        
+        # Draw filter preview strip
+        if self.show_preview_strip:
+            strip = create_filter_preview_strip(frame, self.filter_manager, preview_height=60)
+            strip_h = strip.shape[0]
+            ui_frame[-strip_h:, :] = strip
+        
+        # Draw instructions at bottom
+        if not self.show_preview_strip:
+            instructions = "[H] Help | [F] Filters | [SPACE] Capture | [M] Mode | [Q] Quit"
+            cv2.putText(ui_frame, instructions,
+                       (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
+        
+        return ui_frame
+    
+    def draw_help_overlay(self, frame: np.ndarray) -> np.ndarray:
+        """Draw help overlay with controls"""
+        overlay = frame.copy()
+        h, w = frame.shape[:2]
+        
+        # Semi-transparent background
+        cv2.rectangle(overlay, (50, 50), (w - 50, h - 50), (0, 0, 0), -1)
+        frame = cv2.addWeighted(frame, 0.3, overlay, 0.7, 0)
+        
+        # Title
+        cv2.putText(frame, "SMILEY BOOTH - CONTROLS",
+                   (w // 2 - 200, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 2)
+        
+        controls = [
+            ("SPACE", "Take photo (manual) / Start countdown"),
+            ("M", "Toggle Auto/Manual capture mode"),
+            ("LEFT/RIGHT", "Change filter"),
+            ("F", "Toggle filter preview strip"),
+            ("H", "Toggle this help screen"),
+            ("S", "Save current frame"),
+            ("R", "Reset detection"),
+            ("Q / ESC", "Quit application"),
+            ("", ""),
+            ("AUTO MODE:", "Photo taken when centered + smiling"),
+            ("MANUAL MODE:", "Press SPACE for 3-second countdown"),
+        ]
+        
+        y_start = 160
+        for i, (key, desc) in enumerate(controls):
+            y = y_start + i * 35
+            if key:
+                cv2.putText(frame, f"[{key}]", (100, y),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                cv2.putText(frame, desc, (280, y),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
+            else:
+                cv2.putText(frame, desc, (100, y),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 200, 100), 2)
+        
+        cv2.putText(frame, "Press H to close",
+                   (w // 2 - 100, h - 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (150, 150, 150), 1)
+        
+        return frame
+    
+    def handle_key(self, key: int, frame: np.ndarray) -> bool:
+        """
+        Handle keyboard input
+        Returns False to quit, True to continue
+        """
+        if key == -1:
+            return True
+        
+        key = key & 0xFF
+        
+        # Quit
+        if key == ord('q') or key == 27:  # q or ESC
+            return False
+        
+        # Help toggle
+        elif key == ord('h'):
+            self.show_help = not self.show_help
+        
+        # Filter preview toggle
+        elif key == ord('f'):
+            self.show_preview_strip = not self.show_preview_strip
+        
+        # Next filter (right arrow or period)
+        elif key == ord('.') or key == 3 or key == 83:  # Right arrow
+            self.filter_manager.next_filter()
+        
+        # Previous filter (left arrow or comma)
+        elif key == ord(',') or key == 2 or key == 81:  # Left arrow
+            self.filter_manager.prev_filter()
+        
+        # Manual capture mode toggle
+        elif key == ord('m'):
+            self.manual_capture_mode = not self.manual_capture_mode
+            mode = "Manual" if self.manual_capture_mode else "Auto"
+            print(f"Capture mode: {mode}")
+        
+        # Space - manual capture or countdown
+        elif key == ord(' '):
+            if self.manual_capture_mode:
+                # Start countdown
+                self.countdown_active = True
+                self.countdown_start = time.time()
+                print("Countdown started!")
+            else:
+                # Immediate capture
+                self.trigger_capture(frame)
+        
+        # Save current frame
+        elif key == ord('s'):
+            self.trigger_capture(frame)
+        
+        # Reset detection
+        elif key == ord('r'):
+            self.capture_controller.reset()
+            print("Detection reset")
+        
+        # Number keys for quick filter selection
+        elif ord('1') <= key <= ord('9'):
+            filter_idx = key - ord('1')
+            if filter_idx < len(self.filter_manager.filter_names):
+                self.filter_manager.current_filter_index = filter_idx
+        
+        return True
+    
+    def run(self):
+        """Main application loop"""
+        print("\n" + "=" * 60)
+        print("       SMILEY BOOTH - Smart Photobooth")
+        print("       CS445 Final Project")
+        print("=" * 60)
+        print("\nStarting camera...")
+        
+        if not self.init_camera():
+            return
+        
+        print("\nControls:")
+        print("  [H] Show help")
+        print("  [SPACE] Take photo")
+        print("  [LEFT/RIGHT] or [,/.] Change filter")
+        print("  [M] Toggle auto/manual mode")
+        print("  [Q] Quit")
+        print("\nPhotos will be saved to:", os.path.abspath(self.output_dir))
+        print("\n" + "-" * 60 + "\n")
+        
+        cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(self.window_name, 1280, 720)
+        
+        try:
+            while True:
+                # Read frame
+                ret, frame = self.cap.read()
+                if not ret:
+                    print("Error: Could not read frame")
+                    break
+                
+                # Mirror the frame for natural interaction
+                frame = cv2.flip(frame, 1)
+                
+                # Detect face and smile
+                face_data = self.detector.detect(frame)
+                
+                # Check for auto-capture (if in auto mode)
+                if not self.manual_capture_mode and not self.countdown_active:
+                    if self.capture_controller.update(face_data):
+                        self.trigger_capture(frame)
+                
+                # Apply current filter for preview
+                filtered_frame = self.filter_manager.apply_current_filter(frame)
+                
+                # Draw UI overlay
+                display_frame = self.draw_ui(filtered_frame, face_data)
+                
+                # Show frame
+                cv2.imshow(self.window_name, display_frame)
+                
+                # Handle keyboard input
+                key = cv2.waitKey(1)
+                if not self.handle_key(key, frame):
+                    break
+                
+        except KeyboardInterrupt:
+            print("\nInterrupted by user")
+        
+        finally:
+            self.cleanup()
+    
+    def cleanup(self):
+        """Release resources"""
+        print("\nCleaning up...")
+        if self.cap is not None:
+            self.cap.release()
+        cv2.destroyAllWindows()
+        print("Goodbye!")
+
+
+class DemoMode:
+    """
+    Demo mode for testing filters without camera
+    Uses sample images or generates test patterns
+    """
+    
+    def __init__(self):
+        self.filter_manager = FilterManager()
+        self.window_name = "Smiley Booth - Filter Demo"
+    
+    def create_test_image(self, width: int = 640, height: int = 480) -> np.ndarray:
+        """Create a colorful test image"""
+        img = np.zeros((height, width, 3), dtype=np.uint8)
+        
+        # Gradient background
+        for y in range(height):
+            for x in range(width):
+                img[y, x] = [
+                    int(255 * x / width),
+                    int(255 * y / height),
+                    int(255 * (1 - x / width))
+                ]
+        
+        # Add some shapes
+        cv2.circle(img, (width // 2, height // 2), 100, (255, 255, 255), -1)
+        cv2.rectangle(img, (50, 50), (150, 150), (0, 255, 0), -1)
+        cv2.rectangle(img, (width - 150, 50), (width - 50, 150), (255, 0, 0), -1)
+        
+        return img
+    
+    def run(self, image_path: Optional[str] = None):
+        """Run filter demo"""
+        if image_path and os.path.exists(image_path):
+            test_image = cv2.imread(image_path)
+        else:
+            test_image = self.create_test_image()
+        
+        print("Filter Demo Mode")
+        print("Press LEFT/RIGHT to change filters, Q to quit")
+        
+        cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
+        
+        while True:
+            # Apply current filter
+            filtered = self.filter_manager.apply_current_filter(test_image)
+            
+            # Add filter name
+            filter_name = self.filter_manager.get_current_filter_name()
+            cv2.putText(filtered, f"Filter: {filter_name}",
+                       (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            
+            cv2.imshow(self.window_name, filtered)
+            
+            key = cv2.waitKey(100) & 0xFF
+            
+            if key == ord('q'):
+                break
+            elif key == ord('.') or key == 3 or key == 83:
+                self.filter_manager.next_filter()
+            elif key == ord(',') or key == 2 or key == 81:
+                self.filter_manager.prev_filter()
+        
+        cv2.destroyAllWindows()
+
+
+def main():
+    """Main entry point"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description="Smiley Booth - Smart Photobooth Application",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python smiley_booth.py                    # Run with default camera
+  python smiley_booth.py --camera 1         # Use camera ID 1
+  python smiley_booth.py --demo             # Run filter demo mode
+  python smiley_booth.py --output photos    # Save to 'photos' folder
+        """
+    )
+    
+    parser.add_argument(
+        '--camera', '-c',
+        type=int,
+        default=0,
+        help='Camera device ID (default: 0)'
+    )
+    
+    parser.add_argument(
+        '--output', '-o',
+        type=str,
+        default='captured_photos',
+        help='Output directory for captured photos (default: captured_photos)'
+    )
+    
+    parser.add_argument(
+        '--demo', '-d',
+        action='store_true',
+        help='Run in demo mode (test filters without camera)'
+    )
+    
+    parser.add_argument(
+        '--image', '-i',
+        type=str,
+        help='Image file for demo mode'
+    )
+    
+    args = parser.parse_args()
+    
+    if args.demo:
+        demo = DemoMode()
+        demo.run(args.image)
+    else:
+        booth = SmileyBooth(
+            camera_id=args.camera,
+            output_dir=args.output
+        )
+        booth.run()
+
+
+if __name__ == "__main__":
+    main()
+
