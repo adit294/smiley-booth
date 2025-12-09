@@ -1,4 +1,4 @@
-# Smiley Booth - Smart Photobooth 📸
+# 📸 Smiley Booth - Smart Photobooth
 
 **CS445 Computational Photography - Final Project**
 
@@ -6,249 +6,323 @@
 
 ---
 
-## Overview
+## 🎯 What is Smiley Booth?
 
-Smiley Booth is an intelligent photobooth application that uses computer vision to automatically capture photos when the user is:
-1. **Centered** in the frame
-2. **Smiling**
+Smiley Booth is a **smart photobooth** that automatically takes your photo when you:
+1. **Stand in the center** of the camera frame
+2. **Smile** for about 3 seconds
 
-The application features real-time face detection, smile recognition, and 15 creative artistic filters.
-
-## Features
-
-### 🎯 Smart Detection
-- **Face Detection:** Uses MediaPipe Face Mesh with 468 facial landmarks
-- **Smile Detection:** Geometric analysis of mouth aspect ratio, lip corner elevation, and symmetry
-- **Centering Feedback:** Visual guides help users position themselves correctly
-- **Temporal Smoothing:** Reduces false positives for stable detection
-
-### 🎨 Creative Filters (15 Total)
-
-| Filter | Technical Implementation |
-|--------|-------------------------|
-| **Normal** | Pass-through, no transformation applied |
-| **Pencil Sketch** | BGR→Grayscale conversion, bitwise inversion, Gaussian blur (21×21 kernel), color dodge blending via `cv2.divide(gray, 255-blurred, scale=256)` |
-| **Color Sketch** | Grayscale sketch + BGR original blended with `cv2.addWeighted(0.4, 0.6)`, HSV saturation channel multiplied by 1.3× |
-| **Glitch** | RGB channel separation via `cv2.split()`, per-channel affine warp displacement (±10px), random horizontal slice shifts, scan line overlay (every 4th row at 70% brightness), random noise block injection |
-| **Thermal** | BGR→Grayscale, `cv2.applyColorMap(COLORMAP_JET)`, BGR→LAB conversion, CLAHE on L-channel (clipLimit=3.0, 8×8 tiles) |
-| **Pinhole** | Euclidean distance mask from center, radial vignette `1-(dist/max)^1.5`, Gaussian blur (15×15) blended at edges, sepia matrix transform `[[0.272,0.534,0.131],[0.349,0.686,0.168],[0.393,0.769,0.189]]` |
-| **Vintage** | Sepia color matrix transformation, R-channel ×1.1, B-channel ×0.9, HSV saturation ×0.7, quadratic vignette falloff, Gaussian noise (σ=15) |
-| **Pop Art** | Color quantization to 6 levels via integer division `(px//42)*42`, HSV saturation ×2.0, value ×1.2, Canny edge detection (100,200 thresholds), dilated black edge overlay |
-| **Neon** | BGR→Grayscale, Canny edges (50,150), morphological dilation (3×3 kernel, 2 iterations), BGR channel assignment from edges, Gaussian blur glow (15×15), dark background blend (original ×0.2) |
-| **Cartoon** | Bilateral filter (d=9, σ_color=300, σ_space=300), median blur (7×7) on grayscale, adaptive threshold (block=9, C=9), color posterization `(px//32)*32`, bitwise AND with edge mask |
-| **Emboss** | 3×3 convolution kernel `[[-2,-1,0],[-1,1,1],[0,1,2]]` via `cv2.filter2D()`, +128 offset for visibility |
-| **Watercolor** | Triple bilateral filter pass (d=9, σ=75), HSV saturation ×0.8, Gaussian noise texture (σ=10) with 5×5 blur |
-| **Noir** | BGR→Grayscale, CLAHE (clipLimit=4.0, 8×8 tiles), contrast curve `gray×1.3-30`, B-channel ×1.1 for cold tint, power vignette `1-(dist/max)^1.5 × 0.6` |
-| **Cyberpunk** | BGR→LAB, CLAHE on L-channel, HSV saturation ×1.5, B+30/G+15 global shift, conditional R+40/B+20 on bright pixels (mean>128), scan lines every 3rd row at 80% |
-| **Vaporwave** | HSV hue rotation +150° (mod 180), saturation ×1.4, vertical BGR gradient overlay (pink→cyan), `cv2.addWeighted(0.7, 0.3)` blend, horizontal scan lines every 4th row at 85% |
-
-### 📷 Capture Modes
-- **Auto Capture:** Automatically captures when centered and smiling
-- **Manual Capture:** Press SPACE to take a photo instantly
+It also has **15 fun filters** to make your photos look cool!
 
 ---
 
-## Installation
+## 🚀 Quick Start
 
-### Prerequisites
-- Python 3.8 or higher
-- Webcam
-
-### Setup
-
-1. **Clone/Download the project:**
 ```bash
-cd /Users/adit/Downloads/cs445_project
-```
-
-2. **Create a virtual environment (recommended):**
-```bash
-python3 -m venv venv
-source venv/bin/activate  # On macOS/Linux
-# or
-venv\Scripts\activate     # On Windows
-```
-
-3. **Install dependencies:**
-```bash
+# Install dependencies
 pip install -r requirements.txt
-```
 
----
-
-## Usage
-
-### Run the Photobooth
-```bash
+# Run the photobooth
 python smiley_booth.py
 ```
 
-### Command Line Options
-```bash
-python smiley_booth.py --help
+That's it! A window will open with your camera. Center yourself and smile!
 
-# Options:
-#   --camera, -c    Camera device ID (default: 0)
-#   --output, -o    Output directory (default: captured_photos)
-#   --demo, -d      Run filter demo mode
-#   --image, -i     Image file for demo mode
+---
+
+## 🎮 Controls
+
+| Key | What it does |
+|-----|--------------|
+| `SPACE` | Take a photo right now |
+| `←` or `,` | Previous filter |
+| `→` or `.` | Next filter |
+| `1-9` | Jump to filter 1-9 |
+| `Q` | Quit |
+
+---
+
+## 📁 Project Files Explained
+
+Our project has **4 main files**. Here's what each one does:
+
+### 1️⃣ `smiley_booth.py` - The Main App
+
+**What it does:** This is the "brain" of the application. It connects everything together.
+
+**How it works (step by step):**
+
+```
+1. Opens your webcam
+2. Reads each video frame (30 times per second)
+3. Sends frame to detection.py to find your face and smile
+4. Sends frame to filters.py to apply cool effects
+5. Shows everything on screen
+6. When you smile long enough → saves the photo!
 ```
 
-### Examples
-```bash
-# Use default camera
-python smiley_booth.py
+**Key parts:**
+- `SmileyBooth` class - the main application
+- `init_camera()` - turns on your webcam
+- `trigger_capture()` - takes and saves the photo
+- `draw_ui()` - draws the buttons, boxes, and info on screen
+- `run()` - the main loop that keeps everything running
 
-# Use external camera (ID 1)
+---
+
+### 2️⃣ `detection.py` - Face & Smile Detection
+
+**What it does:** Finds your face and figures out if you're smiling.
+
+**The technology:** We use **MediaPipe Face Mesh** from Google. It finds **468 points** on your face!
+
+```
+         👁️          👁️        ← Eye landmarks
+            
+             👃               ← Nose landmark
+    
+    Point 61 → 👄 ← Point 291  ← Mouth corner landmarks
+```
+
+**How smile detection works:**
+
+We measure 4 things to detect a smile:
+
+| Feature | What we check | Why |
+|---------|---------------|-----|
+| **Mouth Width** | Distance between mouth corners | Smiles are WIDER |
+| **Corner Lift** | Are corners above the center? | Smiles lift UP ↑ |
+| **Mouth Opening** | Is mouth slightly open? | Smiles often show teeth |
+| **Symmetry** | Are both sides equal? | Frowns are often uneven |
+
+**The math (simplified):**
+```
+smile_score = (mouth_width × 0.35) + (corner_lift × 0.40) + (opening × 0.15) + (angle × 0.10)
+
+If smile_score > 55% → You're smiling! ✓
+```
+
+**Centering check:**
+- We find the center of your face
+- We find the center of the camera frame
+- If they're close (within 12%) → You're centered! ✓
+
+---
+
+### 3️⃣ `filters.py` - Creative Photo Effects
+
+**What it does:** Makes your photos look artistic with 15 different filters.
+
+**The filters and how they work:**
+
+| Filter | How it's made |
+|--------|---------------|
+| **Pencil Sketch** | Convert to gray → Invert → Blur → Blend (looks like pencil drawing) |
+| **Color Sketch** | Same as pencil but keep some original colors |
+| **Glitch** | Split RGB colors → Shift them apart → Add noise blocks |
+| **Thermal** | Convert to gray → Apply heat-map colors (red=hot, blue=cold) |
+| **Pinhole** | Darken the edges → Blur the corners (old camera look) |
+| **Vintage** | Add brown/yellow tint → Add film grain noise |
+| **Pop Art** | Reduce colors to 6 → Make them super bright → Add black edges |
+| **Neon** | Find edges → Color them bright → Add glow effect |
+| **Cartoon** | Smooth the colors → Find edges → Combine them |
+| **Emboss** | Apply a 3x3 pattern that makes things look 3D |
+| **Watercolor** | Smooth colors multiple times → Add paper texture |
+| **Noir** | Black & white → High contrast → Dark edges |
+| **Cyberpunk** | Boost contrast → Add cyan/magenta colors → Add scan lines |
+| **Vaporwave** | Shift colors to pink/purple → Add gradient → Add scan lines |
+
+**Color spaces we use:**
+- **BGR** - Normal color (Blue, Green, Red)
+- **Grayscale** - Black and white
+- **HSV** - Hue (color), Saturation (intensity), Value (brightness)
+- **LAB** - Lightness and color channels (good for contrast)
+
+---
+
+### 4️⃣ `requirements.txt` - What You Need to Install
+
+```
+opencv-python        → For camera and image processing
+opencv-contrib-python → Extra OpenCV features
+numpy                → For math operations on images
+mediapipe            → For face detection (Google's AI)
+Pillow               → Extra image support
+```
+
+---
+
+## 🔄 How Everything Works Together
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    smiley_booth.py                          │
+│                    (Main Controller)                        │
+└─────────────────────────────────────────────────────────────┘
+                           │
+           ┌───────────────┼───────────────┐
+           │               │               │
+           ▼               ▼               ▼
+    ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
+    │   WEBCAM    │ │ detection.py│ │  filters.py │
+    │   (Input)   │ │ (Find Face) │ │  (Effects)  │
+    └─────────────┘ └─────────────┘ └─────────────┘
+           │               │               │
+           │               │               │
+           ▼               ▼               ▼
+    ┌─────────────────────────────────────────────────────────┐
+    │                    YOUR SCREEN                          │
+    │  ┌─────────────────────────────────────────────────┐   │
+    │  │                                                 │   │
+    │  │    [Centering Guide]     [Filter Name]         │   │
+    │  │                                                 │   │
+    │  │              ┌─────────┐                       │   │
+    │  │              │  YOUR   │                       │   │
+    │  │              │  FACE   │                       │   │
+    │  │              │  HERE   │                       │   │
+    │  │              └─────────┘                       │   │
+    │  │                                                 │   │
+    │  │    [Smile: YES/NO]    [Confidence Bar]         │   │
+    │  │                                                 │   │
+    │  │  [Filter 1][Filter 2][Filter 3]...[Filter 15]  │   │
+    │  └─────────────────────────────────────────────────┘   │
+    └─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 📷 The Auto-Capture Process
+
+```
+Step 1: Camera reads your face
+            ↓
+Step 2: Are you CENTERED?
+        ├── NO → Show arrow (← LEFT, RIGHT →, etc.)
+        └── YES → Continue to Step 3
+            ↓
+Step 3: Are you SMILING?
+        ├── NO → Show "Smile: No (need 55%)"
+        └── YES → Start counting!
+            ↓
+Step 4: Keep smiling for 80 frames (~3 seconds)
+        ├── Stopped smiling? → Reset counter to 0
+        └── Still smiling? → Counter goes up
+            ↓
+Step 5: Counter reaches 80?
+        └── YES → 📸 FLASH! Photo saved!
+            ↓
+Step 6: Wait 45 frames (~1.5 sec) before next photo
+```
+
+---
+
+## 🎨 Understanding the Filters (Technical)
+
+### Color Spaces
+
+**BGR (Blue-Green-Red):**
+- How computers store color images
+- Each pixel has 3 values: B, G, R (0-255 each)
+- Example: Pure red = (0, 0, 255)
+
+**Grayscale:**
+- Just brightness, no color
+- Each pixel is one value (0=black, 255=white)
+
+**HSV (Hue-Saturation-Value):**
+- H = What color (0-180: red→yellow→green→cyan→blue→magenta)
+- S = How vivid (0=gray, 255=pure color)
+- V = How bright (0=dark, 255=bright)
+
+### Common Operations
+
+**Gaussian Blur:** Smooths the image by averaging nearby pixels
+```python
+blurred = cv2.GaussianBlur(image, (21, 21), 0)
+#                          size of blur area ↑
+```
+
+**Edge Detection (Canny):** Finds outlines in images
+```python
+edges = cv2.Canny(gray_image, 50, 150)
+#                 low threshold ↑   ↑ high threshold
+```
+
+**Color Conversion:**
+```python
+gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)  # Color → Gray
+hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)    # BGR → HSV
+```
+
+**Blending Two Images:**
+```python
+result = cv2.addWeighted(image1, 0.7, image2, 0.3, 0)
+#                        weight ↑         ↑ weight (must add to 1.0)
+```
+
+---
+
+## 📂 Where Photos Are Saved
+
+All captured photos go to:
+```
+captured_photos/
+├── smiley_booth_20241208_143052_original.jpg   ← Original photo
+├── smiley_booth_20241208_143052_vintage.jpg    ← With filter applied
+├── smiley_booth_20241208_143055_original.jpg
+├── smiley_booth_20241208_143055_neon.jpg
+└── ...
+```
+
+The filename format: `smiley_booth_DATE_TIME_FILTERNAME.jpg`
+
+---
+
+## ❓ Troubleshooting
+
+**Camera not working?**
+```bash
+# Try a different camera
 python smiley_booth.py --camera 1
-
-# Save photos to custom folder
-python smiley_booth.py --output my_photos
-
-# Test filters without camera
-python smiley_booth.py --demo
-
-# Test filters on an image
-python smiley_booth.py --demo --image sample.jpg
 ```
 
----
+**Smile not detected?**
+- Make sure your face is well-lit
+- Look directly at the camera
+- Try a natural smile (not forced!)
 
-## Controls
-
-| Key | Action |
-|-----|--------|
-| `SPACE` | Take photo manually |
-| `←` / `,` | Previous filter |
-| `→` / `.` | Next filter |
-| `1-9` | Quick filter selection |
-| `Q` / `ESC` | Quit |
+**Too slow?**
+- Close other apps using the camera
+- The filters work in real-time, some are slower than others
 
 ---
 
-## How It Works
+## 🎓 What We Learned
 
-### Face Detection Pipeline
-
-```
-┌─────────────┐    ┌──────────────┐    ┌───────────────┐
-│  Webcam     │───▶│ Face         │───▶│ Centering     │
-│  Feed       │    │ Detection    │    │ Check         │
-└─────────────┘    └──────────────┘    └───────────────┘
-                          │                    │
-                          ▼                    ▼
-                   ┌──────────────┐    ┌───────────────┐
-                   │ Smile        │───▶│ Auto-Capture  │
-                   │ Detection    │    │ Controller    │
-                   └──────────────┘    └───────────────┘
-                                              │
-                                              ▼
-                                       ┌───────────────┐
-                                       │ Apply Filter  │
-                                       │ & Save Photo  │
-                                       └───────────────┘
-```
-
-### Detection Method
-
-**MediaPipe Face Mesh** provides 468 facial landmarks for precise geometric analysis:
-
-### Smile Detection Logic
-1. **Mouth Aspect Ratio (MAR):** Wider mouth relative to face width indicates smile
-2. **Lip Corner Elevation:** Corners lift above mouth center when smiling
-3. **Symmetry Check:** Penalizes asymmetric expressions (grimaces/frowns)
-4. **Corner Angle:** Positive angle = upturned corners
-5. **Temporal Smoothing:** 8-frame history, requires 70% consistency
+1. **Computer Vision:** How to use OpenCV and MediaPipe
+2. **Face Detection:** Using 468 landmark points to find facial features
+3. **Image Processing:** Converting between color spaces, applying filters
+4. **Real-time Processing:** Making everything work at 30 FPS
+5. **Software Design:** Organizing code into modules (detection, filters, main app)
 
 ---
 
-## Project Structure
+## 📚 Libraries Used
 
-```
-cs445_project/
-├── smiley_booth.py    # Main application
-├── detection.py       # Face & smile detection module
-├── filters.py         # Creative image filters
-├── requirements.txt   # Python dependencies
-├── README.md          # This file
-└── captured_photos/   # Output directory (created automatically)
-```
+| Library | What it does |
+|---------|--------------|
+| **OpenCV** | Camera capture, image processing, drawing on images |
+| **MediaPipe** | AI-powered face detection with 468 landmarks |
+| **NumPy** | Fast math operations on image arrays |
 
 ---
 
-## Technical Details
+## 🏆 Credits
 
-### Dependencies
-- **OpenCV (cv2):** Image processing, face detection, webcam capture
-- **MediaPipe:** Advanced facial landmark detection
-- **NumPy:** Numerical operations for filters
-- **Pillow:** Additional image processing support
-
-### Performance
-- Target framerate: 30 FPS
-- Face detection: ~10-15ms per frame
-- Filter application: 5-50ms depending on filter complexity
-- Overall latency: <100ms for responsive experience
+- **OpenCV** - opencv.org
+- **MediaPipe** - Google's face detection AI
+- **CS445 Course Staff** - For guidance and support
 
 ---
 
-## Evaluation Criteria
-
-1. **Detection Accuracy:** Face and smile detection under various lighting
-2. **Filter Quality:** Visual appeal of artistic effects
-3. **User Experience:** Responsive interface and helpful feedback
-4. **Robustness:** Stable operation across different users and environments
-
----
-
-## Troubleshooting
-
-### Camera not detected
-```bash
-# List available cameras
-python -c "import cv2; print([cv2.VideoCapture(i).isOpened() for i in range(5)])"
-
-# Try different camera ID
-python smiley_booth.py --camera 1
-```
-
-### Slow performance
-- Close other applications using the camera
-- Reduce resolution in the code
-- Disable filter preview strip with `F` key
-
-### False smile detection
-- Ensure good lighting on face
-- Face the camera directly
-- Smile naturally (exaggerated smiles may not be detected)
-
-### MediaPipe installation issues (Apple Silicon)
-```bash
-pip install mediapipe-silicon  # For M1/M2 Macs
-```
-
----
-
-## Future Improvements
-
-- [ ] Multi-face support
-- [ ] Photo collage mode
-- [ ] Social media sharing
-- [ ] Custom filter creation
-- [ ] Video recording mode
-- [ ] Touch screen support
-
----
-
-## License
-
-This project is created for educational purposes as part of CS445 Computational Photography course.
-
----
-
-## Acknowledgments
-
-- OpenCV team for computer vision tools
-- MediaPipe team for facial landmark detection
-- CS445 course staff for guidance and support
-
+Made with ❤️ for CS445 Computational Photography
