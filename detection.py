@@ -432,7 +432,7 @@ class CaptureController:
     Controls automatic photo capture based on smile and centering
     """
     
-    def __init__(self, required_smile_frames: int = 15, cooldown_frames: int = 60):
+    def __init__(self, required_smile_frames: int = 150, cooldown_frames: int = 60):
         self.required_smile_frames = required_smile_frames
         self.cooldown_frames = cooldown_frames
         self.consecutive_smile_frames = 0
