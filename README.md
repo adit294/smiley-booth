@@ -23,23 +23,24 @@ The application features real-time face detection, smile recognition, and 15 cre
 - **Temporal Smoothing:** Reduces false positives for stable detection
 
 ### 🎨 Creative Filters (15 Total)
-| Filter | Description |
-|--------|-------------|
-| Normal | No effect - original image |
-| Pencil Sketch | Black and white pencil drawing |
-| Color Sketch | Colored pencil effect |
-| Glitch | Digital glitch with RGB shifting |
-| Thermal | Infrared/heat vision effect |
-| Pinhole | Vignette with radial blur |
-| Vintage | Retro sepia with film grain |
-| Pop Art | Bold posterized colors |
-| Neon | Glowing edge highlights |
-| Cartoon | Cel-shading effect |
-| Emboss | 3D relief texture |
-| Watercolor | Soft painting effect |
-| Noir | High contrast black & white |
-| Cyberpunk | Neon cyan/magenta aesthetic |
-| Vaporwave | Pink/purple retro gradient |
+
+| Filter | Technical Implementation |
+|--------|-------------------------|
+| **Normal** | Pass-through, no transformation applied |
+| **Pencil Sketch** | BGR→Grayscale conversion, bitwise inversion, Gaussian blur (21×21 kernel), color dodge blending via `cv2.divide(gray, 255-blurred, scale=256)` |
+| **Color Sketch** | Grayscale sketch + BGR original blended with `cv2.addWeighted(0.4, 0.6)`, HSV saturation channel multiplied by 1.3× |
+| **Glitch** | RGB channel separation via `cv2.split()`, per-channel affine warp displacement (±10px), random horizontal slice shifts, scan line overlay (every 4th row at 70% brightness), random noise block injection |
+| **Thermal** | BGR→Grayscale, `cv2.applyColorMap(COLORMAP_JET)`, BGR→LAB conversion, CLAHE on L-channel (clipLimit=3.0, 8×8 tiles) |
+| **Pinhole** | Euclidean distance mask from center, radial vignette `1-(dist/max)^1.5`, Gaussian blur (15×15) blended at edges, sepia matrix transform `[[0.272,0.534,0.131],[0.349,0.686,0.168],[0.393,0.769,0.189]]` |
+| **Vintage** | Sepia color matrix transformation, R-channel ×1.1, B-channel ×0.9, HSV saturation ×0.7, quadratic vignette falloff, Gaussian noise (σ=15) |
+| **Pop Art** | Color quantization to 6 levels via integer division `(px//42)*42`, HSV saturation ×2.0, value ×1.2, Canny edge detection (100,200 thresholds), dilated black edge overlay |
+| **Neon** | BGR→Grayscale, Canny edges (50,150), morphological dilation (3×3 kernel, 2 iterations), BGR channel assignment from edges, Gaussian blur glow (15×15), dark background blend (original ×0.2) |
+| **Cartoon** | Bilateral filter (d=9, σ_color=300, σ_space=300), median blur (7×7) on grayscale, adaptive threshold (block=9, C=9), color posterization `(px//32)*32`, bitwise AND with edge mask |
+| **Emboss** | 3×3 convolution kernel `[[-2,-1,0],[-1,1,1],[0,1,2]]` via `cv2.filter2D()`, +128 offset for visibility |
+| **Watercolor** | Triple bilateral filter pass (d=9, σ=75), HSV saturation ×0.8, Gaussian noise texture (σ=10) with 5×5 blur |
+| **Noir** | BGR→Grayscale, CLAHE (clipLimit=4.0, 8×8 tiles), contrast curve `gray×1.3-30`, B-channel ×1.1 for cold tint, power vignette `1-(dist/max)^1.5 × 0.6` |
+| **Cyberpunk** | BGR→LAB, CLAHE on L-channel, HSV saturation ×1.5, B+30/G+15 global shift, conditional R+40/B+20 on bright pixels (mean>128), scan lines every 3rd row at 80% |
+| **Vaporwave** | HSV hue rotation +150° (mod 180), saturation ×1.4, vertical BGR gradient overlay (pink→cyan), `cv2.addWeighted(0.7, 0.3)` blend, horizontal scan lines every 4th row at 85% |
 
 ### 📷 Capture Modes
 - **Auto Mode:** Automatically captures when centered and smiling
