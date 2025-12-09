@@ -34,7 +34,7 @@ class SmileyBooth:
         # Initialize modules
         self.detector = FaceDetector()
         self.capture_controller = CaptureController(
-            required_smile_frames=150,  # About 5 seconds of smiling
+            required_smile_frames=80,  # About 5 seconds of smiling
             cooldown_frames=45  # 1.5 seconds between captures
         )
         self.filter_manager = FilterManager()
