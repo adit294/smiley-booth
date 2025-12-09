@@ -45,11 +45,6 @@ class SmileyBooth:
         
         # UI state
         self.show_preview_strip = True
-        self.show_help = False
-        self.manual_capture_mode = False
-        self.countdown_active = False
-        self.countdown_start = 0
-        self.countdown_duration = 3
         
         # Window settings
         self.window_name = "Smiley Booth - Smart Photobooth"
@@ -126,14 +121,8 @@ class SmileyBooth:
         cv2.putText(ui_frame, f"Filter: {filter_name}",
                    (w - 300, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
         
-        # Draw capture mode indicator
-        mode_text = "AUTO" if not self.manual_capture_mode else "MANUAL"
-        mode_color = (0, 255, 0) if not self.manual_capture_mode else (255, 165, 0)
-        cv2.putText(ui_frame, f"Mode: {mode_text}",
-                   (w - 300, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, mode_color, 2)
-        
-        # Draw countdown to capture (auto mode)
-        if not self.manual_capture_mode and face_data:
+        # Draw countdown to capture
+        if face_data:
             countdown = self.capture_controller.get_countdown()
             if countdown > 0:
                 # Draw countdown circle
@@ -144,20 +133,6 @@ class SmileyBooth:
                 cv2.ellipse(ui_frame, center, (40, 40), -90, 0, end_angle, (0, 255, 0), 5)
                 cv2.putText(ui_frame, f"{countdown}", (center[0] - 10, center[1] + 10),
                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
-        
-        # Draw manual countdown
-        if self.countdown_active:
-            elapsed = time.time() - self.countdown_start
-            remaining = self.countdown_duration - int(elapsed)
-            
-            if remaining > 0:
-                # Large countdown number
-                cv2.putText(ui_frame, str(remaining),
-                           (w // 2 - 50, h // 2 + 50),
-                           cv2.FONT_HERSHEY_SIMPLEX, 5, (0, 255, 255), 10)
-            else:
-                self.countdown_active = False
-                self.trigger_capture(frame)
         
         # Draw flash effect
         if self.flash_alpha > 0:
@@ -192,67 +167,13 @@ class SmileyBooth:
             else:
                 self.show_captured_preview = False
         
-        # Draw help overlay
-        if self.show_help:
-            ui_frame = self.draw_help_overlay(ui_frame)
-        
         # Draw filter preview strip
         if self.show_preview_strip:
             strip = create_filter_preview_strip(frame, self.filter_manager, preview_height=60)
             strip_h = strip.shape[0]
             ui_frame[-strip_h:, :] = strip
         
-        # Draw instructions at bottom
-        if not self.show_preview_strip:
-            instructions = "[H] Help | [F] Filters | [SPACE] Capture | [M] Mode | [Q] Quit"
-            cv2.putText(ui_frame, instructions,
-                       (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
-        
         return ui_frame
-    
-    def draw_help_overlay(self, frame: np.ndarray) -> np.ndarray:
-        """Draw help overlay with controls"""
-        overlay = frame.copy()
-        h, w = frame.shape[:2]
-        
-        # Semi-transparent background
-        cv2.rectangle(overlay, (50, 50), (w - 50, h - 50), (0, 0, 0), -1)
-        frame = cv2.addWeighted(frame, 0.3, overlay, 0.7, 0)
-        
-        # Title
-        cv2.putText(frame, "SMILEY BOOTH - CONTROLS",
-                   (w // 2 - 200, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 2)
-        
-        controls = [
-            ("SPACE", "Take photo (manual) / Start countdown"),
-            ("M", "Toggle Auto/Manual capture mode"),
-            ("LEFT/RIGHT", "Change filter"),
-            ("F", "Toggle filter preview strip"),
-            ("H", "Toggle this help screen"),
-            ("S", "Save current frame"),
-            ("R", "Reset detection"),
-            ("Q / ESC", "Quit application"),
-            ("", ""),
-            ("AUTO MODE:", "Photo taken when centered + smiling"),
-            ("MANUAL MODE:", "Press SPACE for 3-second countdown"),
-        ]
-        
-        y_start = 160
-        for i, (key, desc) in enumerate(controls):
-            y = y_start + i * 35
-            if key:
-                cv2.putText(frame, f"[{key}]", (100, y),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(frame, desc, (280, y),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
-            else:
-                cv2.putText(frame, desc, (100, y),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 200, 100), 2)
-        
-        cv2.putText(frame, "Press H to close",
-                   (w // 2 - 100, h - 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (150, 150, 150), 1)
-        
-        return frame
     
     def handle_key(self, key: int, frame: np.ndarray) -> bool:
         """
@@ -268,14 +189,6 @@ class SmileyBooth:
         if key == ord('q') or key == 27:  # q or ESC
             return False
         
-        # Help toggle
-        elif key == ord('h'):
-            self.show_help = not self.show_help
-        
-        # Filter preview toggle
-        elif key == ord('f'):
-            self.show_preview_strip = not self.show_preview_strip
-        
         # Next filter (right arrow or period)
         elif key == ord('.') or key == 3 or key == 83:  # Right arrow
             self.filter_manager.next_filter()
@@ -284,31 +197,9 @@ class SmileyBooth:
         elif key == ord(',') or key == 2 or key == 81:  # Left arrow
             self.filter_manager.prev_filter()
         
-        # Manual capture mode toggle
-        elif key == ord('m'):
-            self.manual_capture_mode = not self.manual_capture_mode
-            mode = "Manual" if self.manual_capture_mode else "Auto"
-            print(f"Capture mode: {mode}")
-        
-        # Space - manual capture or countdown
+        # Space - manual capture
         elif key == ord(' '):
-            if self.manual_capture_mode:
-                # Start countdown
-                self.countdown_active = True
-                self.countdown_start = time.time()
-                print("Countdown started!")
-            else:
-                # Immediate capture
-                self.trigger_capture(frame)
-        
-        # Save current frame
-        elif key == ord('s'):
             self.trigger_capture(frame)
-        
-        # Reset detection
-        elif key == ord('r'):
-            self.capture_controller.reset()
-            print("Detection reset")
         
         # Number keys for quick filter selection
         elif ord('1') <= key <= ord('9'):
@@ -330,10 +221,9 @@ class SmileyBooth:
             return
         
         print("\nControls:")
-        print("  [H] Show help")
         print("  [SPACE] Take photo")
         print("  [LEFT/RIGHT] or [,/.] Change filter")
-        print("  [M] Toggle auto/manual mode")
+        print("  [1-9] Quick filter selection")
         print("  [Q] Quit")
         print("\nPhotos will be saved to:", os.path.abspath(self.output_dir))
         print("\n" + "-" * 60 + "\n")
@@ -355,10 +245,9 @@ class SmileyBooth:
                 # Detect face and smile
                 face_data = self.detector.detect(frame)
                 
-                # Check for auto-capture (if in auto mode)
-                if not self.manual_capture_mode and not self.countdown_active:
-                    if self.capture_controller.update(face_data):
-                        self.trigger_capture(frame)
+                # Check for auto-capture
+                if self.capture_controller.update(face_data):
+                    self.trigger_capture(frame)
                 
                 # Apply current filter for preview
                 filtered_frame = self.filter_manager.apply_current_filter(frame)

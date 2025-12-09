@@ -43,8 +43,8 @@ The application features real-time face detection, smile recognition, and 15 cre
 | **Vaporwave** | HSV hue rotation +150° (mod 180), saturation ×1.4, vertical BGR gradient overlay (pink→cyan), `cv2.addWeighted(0.7, 0.3)` blend, horizontal scan lines every 4th row at 85% |
 
 ### 📷 Capture Modes
-- **Auto Mode:** Automatically captures when centered and smiling
-- **Manual Mode:** 3-second countdown triggered by spacebar
+- **Auto Capture:** Automatically captures when centered and smiling
+- **Manual Capture:** Press SPACE to take a photo instantly
 
 ---
 
@@ -118,14 +118,9 @@ python smiley_booth.py --demo --image sample.jpg
 
 | Key | Action |
 |-----|--------|
-| `H` | Toggle help overlay |
-| `SPACE` | Take photo / Start countdown |
-| `M` | Toggle Auto/Manual mode |
+| `SPACE` | Take photo manually |
 | `←` / `,` | Previous filter |
 | `→` / `.` | Next filter |
-| `F` | Toggle filter preview strip |
-| `S` | Save current frame |
-| `R` | Reset detection |
 | `1-9` | Quick filter selection |
 | `Q` / `ESC` | Quit |
 
