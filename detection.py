@@ -1,7 +1,7 @@
 """
 Detection Module for Smiley Booth
 Handles face detection, centering feedback, and smile detection
-Using both Haar Cascades and MediaPipe for robust detection
+Using MediaPipe Face Mesh for all detection
 """
 
 import cv2
@@ -25,20 +25,12 @@ class FaceData:
 
 class FaceDetector:
     """
-    Face and Smile Detector using Haar Cascades and MediaPipe
-    Improved smile detection with strict thresholds
+    Face and Smile Detector using MediaPipe Face Mesh
+    Uses 468 facial landmarks for accurate detection
     """
     
     def __init__(self):
-        # Initialize Haar Cascades
-        self.face_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-        )
-        self.smile_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + 'haarcascade_smile.xml'
-        )
-        
-        # Initialize MediaPipe Face Mesh for better landmark detection
+        # Initialize MediaPipe Face Mesh
         self.mp_face_mesh = mp.solutions.face_mesh
         self.face_mesh = self.mp_face_mesh.FaceMesh(
             max_num_faces=1,
@@ -47,20 +39,14 @@ class FaceDetector:
             min_tracking_confidence=0.7
         )
         
-        # Smile detection parameters - STRICTER thresholds
-        self.smile_threshold = 0.55  # Higher threshold for smile detection
+        # Smile detection parameters
+        self.smile_threshold = 0.55  # Threshold for smile detection
         self.min_confidence_for_capture = 0.5  # Minimum confidence needed
-        self.center_tolerance = 0.12  # 12% tolerance from center (stricter)
+        self.center_tolerance = 0.12  # 12% tolerance from center
         
-        # Smoothing for stability - longer history for more stability
+        # Smoothing for stability
         self.smile_history = []
-        self.history_size = 8  # More frames for stability
-        
-        # Calibration values (neutral face baseline)
-        self.neutral_mar = 0.0  # Mouth aspect ratio at neutral
-        self.calibrated = False
-        self.calibration_frames = []
-        self.calibration_count = 0
+        self.history_size = 8  # Frames for stability
         
     def _get_landmark_point(self, landmarks, idx, w, h) -> Tuple[float, float]:
         """Get landmark coordinates in pixels"""
@@ -71,45 +57,36 @@ class FaceDetector:
         """Calculate Euclidean distance between two points"""
         return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
     
-    def detect_faces_haar(self, gray_frame: np.ndarray) -> List[Tuple[int, int, int, int]]:
-        """Detect faces using Haar Cascade"""
-        faces = self.face_cascade.detectMultiScale(
-            gray_frame,
-            scaleFactor=1.1,
-            minNeighbors=6,  # Increased for better accuracy
-            minSize=(120, 120)  # Larger minimum face size
-        )
-        return [tuple(face) for face in faces]
-    
-    def detect_smile_haar(self, gray_frame: np.ndarray, face_bbox: Tuple[int, int, int, int]) -> Tuple[bool, float]:
-        """Detect smile within face region using Haar Cascade - STRICTER"""
-        x, y, w, h = face_bbox
+    def get_face_bbox_from_landmarks(self, landmarks, w: int, h: int) -> Tuple[int, int, int, int]:
+        """
+        Calculate face bounding box from MediaPipe landmarks
+        Uses face oval landmarks (indices for face contour)
+        """
+        # Face oval landmark indices
+        FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288,
+                     397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136,
+                     172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109]
         
-        # Focus on lower third of face for smile detection (more precise)
-        roi_gray = gray_frame[y + int(h*0.55):y + h, x:x + w]
+        x_coords = []
+        y_coords = []
         
-        if roi_gray.size == 0:
-            return False, 0.0
+        for idx in FACE_OVAL:
+            pt = self._get_landmark_point(landmarks, idx, w, h)
+            x_coords.append(pt[0])
+            y_coords.append(pt[1])
         
-        # Much stricter parameters
-        smiles = self.smile_cascade.detectMultiScale(
-            roi_gray,
-            scaleFactor=1.5,
-            minNeighbors=30,  # Much higher - fewer false positives
-            minSize=(35, 35)
-        )
+        # Calculate bounding box with padding
+        padding = 20
+        x_min = max(0, int(min(x_coords)) - padding)
+        y_min = max(0, int(min(y_coords)) - padding)
+        x_max = min(w, int(max(x_coords)) + padding)
+        y_max = min(h, int(max(y_coords)) + padding)
         
-        # Require multiple smile detections for confidence
-        if len(smiles) >= 2:
-            confidence = min(len(smiles) / 4.0, 1.0)
-            return True, confidence
-        elif len(smiles) == 1:
-            return False, 0.3  # Single detection not enough
-        return False, 0.0
+        return (x_min, y_min, x_max - x_min, y_max - y_min)
     
     def detect_smile_mediapipe(self, frame: np.ndarray, landmarks) -> Tuple[bool, float]:
         """
-        Detect smile using MediaPipe landmarks - IMPROVED ALGORITHM
+        Detect smile using MediaPipe landmarks
         Uses multiple geometric features for accurate smile detection
         """
         if landmarks is None:
@@ -125,10 +102,8 @@ class FaceDetector:
             
             # Upper lip
             UPPER_LIP_TOP = 13
-            UPPER_LIP_BOTTOM = 14
             
             # Lower lip  
-            LOWER_LIP_TOP = 15
             LOWER_LIP_BOTTOM = 17
             
             # Mouth opening (inner lips)
@@ -137,10 +112,6 @@ class FaceDetector:
             
             # Nose tip for reference
             NOSE_TIP = 4
-            
-            # Cheek landmarks (rise when smiling)
-            LEFT_CHEEK = 234
-            RIGHT_CHEEK = 454
             
             # Eye corners (for face width reference)
             LEFT_EYE_OUTER = 33
@@ -154,8 +125,6 @@ class FaceDetector:
             upper_inner = self._get_landmark_point(landmarks, UPPER_INNER_LIP, w, h)
             lower_inner = self._get_landmark_point(landmarks, LOWER_INNER_LIP, w, h)
             nose_tip = self._get_landmark_point(landmarks, NOSE_TIP, w, h)
-            left_cheek = self._get_landmark_point(landmarks, LEFT_CHEEK, w, h)
-            right_cheek = self._get_landmark_point(landmarks, RIGHT_CHEEK, w, h)
             left_eye = self._get_landmark_point(landmarks, LEFT_EYE_OUTER, w, h)
             right_eye = self._get_landmark_point(landmarks, RIGHT_EYE_OUTER, w, h)
             
@@ -198,11 +167,6 @@ class FaceDetector:
             # ============ FEATURE 4: CORNER ANGLE ============
             # Angle of mouth corners relative to horizontal
             # Positive angle = corners lifted (smile)
-            dx = right_corner[0] - left_corner[0]
-            dy = right_corner[1] - left_corner[1]
-            
-            # Check if corners are roughly level (important for smile)
-            corner_levelness = abs(dy) / (dx + 0.001)  # Should be close to 0 for smile
             
             # Left corner relative to mouth center
             left_angle = math.atan2(mouth_center_y - left_corner[1], 
@@ -291,13 +255,13 @@ class FaceDetector:
         return " & ".join(directions) if directions else "CENTERED ✓"
     
     def smooth_smile_detection(self, is_smiling: bool, confidence: float) -> Tuple[bool, float]:
-        """Apply temporal smoothing to smile detection - STRICTER"""
+        """Apply temporal smoothing to smile detection"""
         self.smile_history.append((is_smiling, confidence))
         
         if len(self.smile_history) > self.history_size:
             self.smile_history.pop(0)
         
-        # Need full history for reliable detection
+        # Need sufficient history for reliable detection
         if len(self.smile_history) < self.history_size // 2:
             return False, confidence
         
@@ -305,8 +269,8 @@ class FaceDetector:
         avg_confidence = sum(c for _, c in self.smile_history) / len(self.smile_history)
         smile_count = sum(1 for s, _ in self.smile_history if s)
         
-        # Require MAJORITY of recent frames to show smile (stricter)
-        min_smile_frames = int(len(self.smile_history) * 0.7)  # 70% must be smiling
+        # Require MAJORITY of recent frames to show smile (70%)
+        min_smile_frames = int(len(self.smile_history) * 0.7)
         smoothed_smiling = smile_count >= min_smile_frames
         
         # Also require minimum average confidence
@@ -317,69 +281,50 @@ class FaceDetector:
     
     def detect(self, frame: np.ndarray) -> Optional[FaceData]:
         """
-        Main detection function - detects face and smile
+        Main detection function - detects face and smile using MediaPipe
         Returns FaceData with all detection results
-        ONLY returns is_smiling=True when BOTH centered AND genuinely smiling
         """
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        h, w = frame.shape[:2]
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
-        # Detect faces using Haar Cascade
-        faces = self.detect_faces_haar(gray)
+        # Process with MediaPipe
+        mp_results = self.face_mesh.process(rgb)
         
-        if len(faces) == 0:
-            self.smile_history.clear()  # Reset history when no face
+        # Check if face detected
+        if not mp_results.multi_face_landmarks:
+            self.smile_history.clear()
             return None
         
-        # Use the largest face
-        face = max(faces, key=lambda f: f[2] * f[3])
-        x, y, w, h = face
-        face_center = (x + w // 2, y + h // 2)
+        landmarks = mp_results.multi_face_landmarks[0]
         
-        # Check centering FIRST
+        # Get face bounding box from landmarks
+        bbox = self.get_face_bbox_from_landmarks(landmarks, w, h)
+        x, y, bw, bh = bbox
+        face_center = (x + bw // 2, y + bh // 2)
+        
+        # Check centering
         is_centered = self.check_centering(face_center, frame.shape)
         
-        # Only process smile if centered (optimization + requirement)
+        # Only process smile if centered
         if not is_centered:
-            self.smile_history.clear()  # Reset when not centered
+            self.smile_history.clear()
             return FaceData(
-                bbox=face,
+                bbox=bbox,
                 center=face_center,
                 is_centered=False,
                 is_smiling=False,
                 smile_confidence=0.0,
-                landmarks=None
+                landmarks=landmarks
             )
         
-        # Detect smile using MediaPipe (primary method)
-        mp_results = self.face_mesh.process(rgb)
-        mp_smile, mp_conf = False, 0.0
-        landmarks = None
-        
-        if mp_results.multi_face_landmarks:
-            landmarks = mp_results.multi_face_landmarks[0]
-            mp_smile, mp_conf = self.detect_smile_mediapipe(frame, landmarks)
-        
-        # Detect smile using Haar (secondary confirmation)
-        haar_smile, haar_conf = self.detect_smile_haar(gray, face)
-        
-        # STRICT COMBINATION: Require MediaPipe detection
-        # Haar is used as bonus confirmation only
-        if mp_smile:
-            combined_smile = True
-            # Boost confidence if Haar also detects
-            combined_conf = mp_conf + (0.1 if haar_smile else 0)
-        else:
-            combined_smile = False
-            combined_conf = mp_conf
-        
-        combined_conf = min(combined_conf, 1.0)
+        # Detect smile
+        is_smiling, confidence = self.detect_smile_mediapipe(frame, landmarks)
         
         # Apply smoothing
-        smoothed_smile, smoothed_conf = self.smooth_smile_detection(combined_smile, combined_conf)
+        smoothed_smile, smoothed_conf = self.smooth_smile_detection(is_smiling, confidence)
         
         return FaceData(
-            bbox=face,
+            bbox=bbox,
             center=face_center,
             is_centered=is_centered,
             is_smiling=smoothed_smile,
@@ -392,7 +337,6 @@ class FaceDetector:
         overlay = frame.copy()
         
         if face_data is None:
-            # No face detected message
             cv2.putText(
                 overlay, "No face detected - Please position yourself",
                 (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2
@@ -439,10 +383,10 @@ class FaceDetector:
             (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 2
         )
         
-        # Draw smile indicator with more detail
+        # Draw smile indicator
         if face_data.is_centered:
             if face_data.is_smiling:
-                smile_text = "Smile: YES! 😊"
+                smile_text = "Smile: YES!"
                 smile_color = (0, 255, 0)
             else:
                 smile_text = f"Smile: No (need {self.smile_threshold:.0%})"
@@ -489,8 +433,8 @@ class CaptureController:
     """
     
     def __init__(self, required_smile_frames: int = 15, cooldown_frames: int = 60):
-        self.required_smile_frames = required_smile_frames  # More frames required
-        self.cooldown_frames = cooldown_frames  # Longer cooldown
+        self.required_smile_frames = required_smile_frames
+        self.cooldown_frames = cooldown_frames
         self.consecutive_smile_frames = 0
         self.cooldown_counter = 0
         self.capture_triggered = False
@@ -499,11 +443,9 @@ class CaptureController:
         """
         Update capture controller state
         Returns True if a capture should be triggered
-        REQUIRES both is_centered AND is_smiling to be True
         """
         self.capture_triggered = False
         
-        # Handle cooldown
         if self.cooldown_counter > 0:
             self.cooldown_counter -= 1
             return False
@@ -512,7 +454,6 @@ class CaptureController:
             self.consecutive_smile_frames = 0
             return False
         
-        # STRICT CHECK: Both conditions must be met
         if face_data.is_centered and face_data.is_smiling:
             self.consecutive_smile_frames += 1
             
@@ -522,7 +463,6 @@ class CaptureController:
                 self.cooldown_counter = self.cooldown_frames
                 return True
         else:
-            # Reset counter if either condition fails
             self.consecutive_smile_frames = 0
         
         return False

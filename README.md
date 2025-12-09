@@ -17,8 +17,8 @@ The application features real-time face detection, smile recognition, and 15 cre
 ## Features
 
 ### 🎯 Smart Detection
-- **Face Detection:** Uses Haar Cascades for robust face detection
-- **Smile Detection:** Combines Haar Cascades and MediaPipe for accurate smile recognition
+- **Face Detection:** Uses MediaPipe Face Mesh with 468 facial landmarks
+- **Smile Detection:** Geometric analysis of mouth aspect ratio, lip corner elevation, and symmetry
 - **Centering Feedback:** Visual guides help users position themselves correctly
 - **Temporal Smoothing:** Reduces false positives for stable detection
 
@@ -149,17 +149,16 @@ python smiley_booth.py --demo --image sample.jpg
                                        └───────────────┘
 ```
 
-### Detection Methods
+### Detection Method
 
-1. **Haar Cascades:** Fast, reliable face and smile detection
-2. **MediaPipe Face Mesh:** 468 facial landmarks for precise smile analysis
-3. **Hybrid Approach:** Combines both for robust detection
+**MediaPipe Face Mesh** provides 468 facial landmarks for precise geometric analysis:
 
 ### Smile Detection Logic
-- Analyzes mouth aspect ratio (wider = smiling)
-- Measures lip corner elevation
-- Uses temporal smoothing (5-frame history)
-- Requires consistent smile for capture trigger
+1. **Mouth Aspect Ratio (MAR):** Wider mouth relative to face width indicates smile
+2. **Lip Corner Elevation:** Corners lift above mouth center when smiling
+3. **Symmetry Check:** Penalizes asymmetric expressions (grimaces/frowns)
+4. **Corner Angle:** Positive angle = upturned corners
+5. **Temporal Smoothing:** 8-frame history, requires 70% consistency
 
 ---
 
