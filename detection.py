@@ -1,7 +1,6 @@
 """
 Detection Module for Smiley Booth
 Handles face detection, centering feedback, and smile detection
-Using MediaPipe Face Mesh for all detection
 """
 
 import cv2
@@ -26,11 +25,9 @@ class FaceData:
 class FaceDetector:
     """
     Face and Smile Detector using MediaPipe Face Mesh
-    Uses 468 facial landmarks for accurate detection
     """
-    
     def __init__(self):
-        # Initialize MediaPipe Face Mesh
+        # Initializing MediaPipe Face Mesh
         self.mp_face_mesh = mp.solutions.face_mesh
         self.face_mesh = self.mp_face_mesh.FaceMesh(
             max_num_faces=1,
@@ -40,27 +37,23 @@ class FaceDetector:
         )
         
         # Smile detection parameters
-        self.smile_threshold = 0.55  # Threshold for smile detection
-        self.min_confidence_for_capture = 0.5  # Minimum confidence needed
-        self.center_tolerance = 0.12  # 12% tolerance from center
-        
-        # Smoothing for stability
+        self.smile_threshold = 0.55  
+        self.min_confidence_for_capture = 0.5 
+        self.center_tolerance = 0.12 
+        # 8 frames for the stability
         self.smile_history = []
-        self.history_size = 8  # Frames for stability
+        self.history_size = 8  
         
     def _get_landmark_point(self, landmarks, idx, w, h) -> Tuple[float, float]:
-        """Get landmark coordinates in pixels"""
         lm = landmarks.landmark[idx]
         return (lm.x * w, lm.y * h)
     
     def _distance(self, p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
-        """Calculate Euclidean distance between two points"""
         return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
     
     def get_face_bbox_from_landmarks(self, landmarks, w: int, h: int) -> Tuple[int, int, int, int]:
         """
         Calculate face bounding box from MediaPipe landmarks
-        Uses face oval landmarks (indices for face contour)
         """
         # Face oval landmark indices
         FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288,
@@ -75,7 +68,7 @@ class FaceDetector:
             x_coords.append(pt[0])
             y_coords.append(pt[1])
         
-        # Calculate bounding box with padding
+        # bounding box with padding
         padding = 20
         x_min = max(0, int(min(x_coords)) - padding)
         y_min = max(0, int(min(y_coords)) - padding)
@@ -87,7 +80,6 @@ class FaceDetector:
     def detect_smile_mediapipe(self, frame: np.ndarray, landmarks) -> Tuple[bool, float]:
         """
         Detect smile using MediaPipe landmarks
-        Uses multiple geometric features for accurate smile detection
         """
         if landmarks is None:
             return False, 0.0
@@ -95,29 +87,25 @@ class FaceDetector:
         h, w = frame.shape[:2]
         
         try:
-            # ============ KEY LANDMARK INDICES ============
             # Mouth corners
             LEFT_CORNER = 61
             RIGHT_CORNER = 291
             
-            # Upper lip
+            # Upper/lower lip
             UPPER_LIP_TOP = 13
-            
-            # Lower lip  
             LOWER_LIP_BOTTOM = 17
             
-            # Mouth opening (inner lips)
+            # Mouth opening
             UPPER_INNER_LIP = 13
             LOWER_INNER_LIP = 14
             
-            # Nose tip for reference
             NOSE_TIP = 4
             
-            # Eye corners (for face width reference)
+            # Eye corners 
             LEFT_EYE_OUTER = 33
             RIGHT_EYE_OUTER = 263
             
-            # Get key points
+            # Getting the key points from face
             left_corner = self._get_landmark_point(landmarks, LEFT_CORNER, w, h)
             right_corner = self._get_landmark_point(landmarks, RIGHT_CORNER, w, h)
             upper_lip = self._get_landmark_point(landmarks, UPPER_LIP_TOP, w, h)
@@ -128,84 +116,74 @@ class FaceDetector:
             left_eye = self._get_landmark_point(landmarks, LEFT_EYE_OUTER, w, h)
             right_eye = self._get_landmark_point(landmarks, RIGHT_EYE_OUTER, w, h)
             
-            # ============ FEATURE 1: MOUTH ASPECT RATIO (MAR) ============
+            # we calculate it using 4 factors: MAR, corner lift, mouth opening, corner angle
+
+            # Mouth Aspect Ratio calculator
             # Wider mouth relative to height = smile
             mouth_width = self._distance(left_corner, right_corner)
-            mouth_height = self._distance(upper_lip, lower_lip)
             
-            # Normalize by face width
+            # normalizing it w face width
             face_width = self._distance(left_eye, right_eye)
             if face_width == 0:
                 return False, 0.0
                 
             normalized_mouth_width = mouth_width / face_width
             
-            # MAR: higher when smiling (mouth gets wider)
             mar = normalized_mouth_width
             
-            # ============ FEATURE 2: LIP CORNER ELEVATION ============
-            # When smiling, corners lift up relative to center of mouth
+            # lip corner lift when smiling
             mouth_center_y = (upper_lip[1] + lower_lip[1]) / 2
             
-            # Corners should be ABOVE (lower y value) the mouth center when smiling
+            # Corners should be above lower y value when smiling
             left_corner_lift = mouth_center_y - left_corner[1]
             right_corner_lift = mouth_center_y - right_corner[1]
             avg_corner_lift = (left_corner_lift + right_corner_lift) / 2
             
-            # Normalize by face height
+            # normalizing it by face height
             face_height = self._distance(nose_tip, (nose_tip[0], 0))
             if face_height > 0:
                 normalized_lift = avg_corner_lift / (face_height * 0.1)
             else:
                 normalized_lift = 0
             
-            # ============ FEATURE 3: MOUTH OPENING ============
-            # Smiles often show teeth (mouth slightly open)
+            # mouth generally opens slightly when smiling
             mouth_opening = self._distance(upper_inner, lower_inner)
             normalized_opening = mouth_opening / face_width if face_width > 0 else 0
             
-            # ============ FEATURE 4: CORNER ANGLE ============
-            # Angle of mouth corners relative to horizontal
-            # Positive angle = corners lifted (smile)
-            
-            # Left corner relative to mouth center
+            # angle of mouth corners relative to horizontal should be positive when smiling            
             left_angle = math.atan2(mouth_center_y - left_corner[1], 
                                     left_corner[0] - (left_corner[0] + right_corner[0])/2)
             right_angle = math.atan2(mouth_center_y - right_corner[1],
                                      (left_corner[0] + right_corner[0])/2 - right_corner[0])
             
-            # Both angles should be positive for a smile
             angle_score = (left_angle + right_angle) / 2
             
-            # ============ COMBINE FEATURES INTO SMILE SCORE ============
+            # combining these factors together
             
-            # Score components (all should be positive for smile)
-            mar_score = max(0, (mar - 0.35) * 3)  # MAR > 0.35 indicates smile
-            lift_score = max(0, normalized_lift * 2)  # Corner lift
-            opening_score = max(0, min(normalized_opening * 2, 0.3))  # Slight opening bonus
+            # all should be positive 
+            # MAR > 0.35 indicates smile
+            mar_score = max(0, (mar - 0.35) * 3)  
+            lift_score = max(0, normalized_lift * 2) 
+            opening_score = max(0, min(normalized_opening * 2, 0.3))  
             angle_bonus = max(0, angle_score * 0.5) if angle_score > 0 else 0
             
-            # Penalty for asymmetric mouth (frown or grimace)
+            # if you frown it should penalize
             asymmetry_penalty = abs(left_corner_lift - right_corner_lift) / (face_width * 0.1 + 0.001)
             asymmetry_penalty = min(asymmetry_penalty * 0.3, 0.3)
-            
-            # Penalty if corners are below mouth center (frown)
             frown_penalty = 0
-            if avg_corner_lift < -2:  # Corners below center
+            if avg_corner_lift < -2:  
                 frown_penalty = 0.5
             
-            # Final smile score
+            # the final smile score
             smile_score = (
-                mar_score * 0.35 +      # Mouth width is important
-                lift_score * 0.40 +      # Corner lift is most important
-                opening_score * 0.15 +   # Small bonus for open mouth
-                angle_bonus * 0.10       # Angle bonus
+                mar_score * 0.35 +      
+                lift_score * 0.40 +     
+                opening_score * 0.15 + 
+                angle_bonus * 0.10      
             ) - asymmetry_penalty - frown_penalty
             
-            # Clamp to [0, 1]
             smile_confidence = max(0, min(smile_score, 1.0))
             
-            # Apply strict threshold
             is_smiling = smile_confidence > self.smile_threshold
             
             return is_smiling, smile_confidence
@@ -218,7 +196,7 @@ class FaceDetector:
         frame_h, frame_w = frame_shape[:2]
         frame_center = (frame_w // 2, frame_h // 2)
         
-        # Calculate tolerance in pixels
+        # calculating tolerance in pixels
         tolerance_x = frame_w * self.center_tolerance
         tolerance_y = frame_h * self.center_tolerance
         
@@ -242,17 +220,17 @@ class FaceDetector:
         
         if abs(dx) > tolerance_x:
             if dx > 0:
-                directions.append("← LEFT")
+                directions.append("LEFT")
             else:
-                directions.append("RIGHT →")
+                directions.append("RIGHT")
         
         if abs(dy) > tolerance_y:
             if dy > 0:
-                directions.append("↑ UP")
+                directions.append("UP")
             else:
-                directions.append("DOWN ↓")
+                directions.append("DOWN")
         
-        return " & ".join(directions) if directions else "CENTERED ✓"
+        return " & ".join(directions) if directions else "CENTERED"
     
     def smooth_smile_detection(self, is_smiling: bool, confidence: float) -> Tuple[bool, float]:
         """Apply temporal smoothing to smile detection"""
@@ -261,19 +239,18 @@ class FaceDetector:
         if len(self.smile_history) > self.history_size:
             self.smile_history.pop(0)
         
-        # Need sufficient history for reliable detection
+        # need sufficient history for reliable detection
         if len(self.smile_history) < self.history_size // 2:
             return False, confidence
         
-        # Calculate smoothed values
+        # calculating smoothed values
         avg_confidence = sum(c for _, c in self.smile_history) / len(self.smile_history)
         smile_count = sum(1 for s, _ in self.smile_history if s)
         
-        # Require MAJORITY of recent frames to show smile (70%)
+        # at least 70% of the recent frames should be smiling
         min_smile_frames = int(len(self.smile_history) * 0.7)
         smoothed_smiling = smile_count >= min_smile_frames
         
-        # Also require minimum average confidence
         if avg_confidence < self.min_confidence_for_capture:
             smoothed_smiling = False
         
@@ -287,25 +264,24 @@ class FaceDetector:
         h, w = frame.shape[:2]
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
-        # Process with MediaPipe
         mp_results = self.face_mesh.process(rgb)
         
-        # Check if face detected
+        # face there? edge case
         if not mp_results.multi_face_landmarks:
             self.smile_history.clear()
             return None
         
         landmarks = mp_results.multi_face_landmarks[0]
         
-        # Get face bounding box from landmarks
+        # face bounding box from landmarks
         bbox = self.get_face_bbox_from_landmarks(landmarks, w, h)
         x, y, bw, bh = bbox
         face_center = (x + bw // 2, y + bh // 2)
         
-        # Check centering
+        # centering
         is_centered = self.check_centering(face_center, frame.shape)
         
-        # Only process smile if centered
+        # should only process smile if centered
         if not is_centered:
             self.smile_history.clear()
             return FaceData(
@@ -317,10 +293,10 @@ class FaceDetector:
                 landmarks=landmarks
             )
         
-        # Detect smile
+        # detect smile
         is_smiling, confidence = self.detect_smile_mediapipe(frame, landmarks)
         
-        # Apply smoothing
+        # apply smoothing
         smoothed_smile, smoothed_conf = self.smooth_smile_detection(is_smiling, confidence)
         
         return FaceData(
@@ -345,17 +321,17 @@ class FaceDetector:
         
         x, y, w, h = face_data.bbox
         
-        # Draw face bounding box
+        # draw face bounding box
         if face_data.is_centered and face_data.is_smiling:
-            color = (0, 255, 0)  # Green when ready to capture
+            color = (0, 255, 0)  # green
         elif face_data.is_centered:
-            color = (0, 255, 255)  # Yellow when centered but not smiling
+            color = (0, 255, 255)  # yellow
         else:
-            color = (0, 165, 255)  # Orange when not centered
+            color = (0, 165, 255)  # orange 
         
         cv2.rectangle(overlay, (x, y), (x + w, y + h), color, 3)
         
-        # Draw center crosshair
+        # center crosshair
         frame_h, frame_w = frame.shape[:2]
         center_x, center_y = frame_w // 2, frame_h // 2
         crosshair_size = 30
@@ -365,7 +341,7 @@ class FaceDetector:
         cv2.line(overlay, (center_x, center_y - crosshair_size), 
                  (center_x, center_y + crosshair_size), (255, 255, 255), 2)
         
-        # Draw centering zone rectangle
+        # centering zone rectangle
         tol_x = int(frame_w * self.center_tolerance)
         tol_y = int(frame_h * self.center_tolerance)
         cv2.rectangle(overlay, 
@@ -373,17 +349,17 @@ class FaceDetector:
                      (center_x + tol_x, center_y + tol_y),
                      (100, 100, 100), 1)
         
-        # Draw face center point
+        # face center point
         cv2.circle(overlay, face_data.center, 8, color, -1)
         
-        # Draw centering guide
+        # centering guide
         direction = self.get_centering_direction(face_data.center, frame.shape)
         cv2.putText(
             overlay, direction,
             (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 2
         )
         
-        # Draw smile indicator
+        # smile indicator
         if face_data.is_centered:
             if face_data.is_smiling:
                 smile_text = "Smile: YES!"
@@ -400,26 +376,26 @@ class FaceDetector:
             (50, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.8, smile_color, 2
         )
         
-        # Draw confidence bar
+        # confidence bar
         bar_x, bar_y = 50, 115
         bar_width, bar_height = 200, 20
         
-        # Background
+        # background
         cv2.rectangle(overlay, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), (50, 50, 50), -1)
         
-        # Threshold marker
+        # threshold marker
         threshold_x = bar_x + int(bar_width * self.smile_threshold)
         cv2.line(overlay, (threshold_x, bar_y), (threshold_x, bar_y + bar_height), (255, 255, 255), 2)
         
-        # Confidence fill
+        # confidence fill
         filled_width = int(bar_width * face_data.smile_confidence)
         bar_color = (0, 255, 0) if face_data.smile_confidence >= self.smile_threshold else (0, 100, 255)
         cv2.rectangle(overlay, (bar_x, bar_y), (bar_x + filled_width, bar_y + bar_height), bar_color, -1)
         
-        # Border
+        # border
         cv2.rectangle(overlay, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), (255, 255, 255), 2)
         
-        # Confidence percentage
+        # confidence percentage
         conf_text = f"{face_data.smile_confidence:.0%}"
         cv2.putText(overlay, conf_text, (bar_x + bar_width + 10, bar_y + 15),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
