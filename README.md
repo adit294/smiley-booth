@@ -180,9 +180,6 @@ Try specifying a different camera ID: `python smiley_booth.py --camera 1`
 - Look directly at the camera
 - Try a natural smile rather than forced
 
-**Performance issues:**
-- Close other applications using the webcam
-- Some filters (watercolor, cartoon) are more computationally intensive
 
 ---
 
